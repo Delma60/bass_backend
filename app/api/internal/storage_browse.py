@@ -76,28 +76,30 @@ async def create_bucket(
 ) -> dict[str, Any]:
     """Create a new storage bucket for the project."""
     import asyncio
-    from app.storage.minio import get_bucket_name, get_s3_client
-    from botocore.exceptions import ClientError
+    from app.storage.minio import ensure_bucket_exists, get_bucket_name
 
     full_name = get_bucket_name(project_id, bucket)
-    s3 = get_s3_client()
-
-    def _create():
-        try:
-            s3.head_bucket(Bucket=full_name)
-        except ClientError as e:
-            code = int(e.response["Error"]["Code"])
-            if code == 404:
-                s3.create_bucket(Bucket=full_name)
-            else:
-                raise
 
     try:
-        await asyncio.to_thread(_create)
+        await asyncio.to_thread(ensure_bucket_exists, full_name)
         return {"data": {"bucket": bucket, "full_name": full_name, "created": True}}
     except Exception as e:
         logger.error("Failed to create bucket %s: %s", full_name, e)
         raise HTTPException(status_code=500, detail=f"Could not create bucket: {e}")
+
+
+@router.delete("/storage/{project_id}/buckets/{bucket}", dependencies=[InternalGuard])
+async def delete_bucket(
+    project_id: str,
+    bucket: str,
+) -> dict[str, Any]:
+    """Delete a storage bucket for the project."""
+    from app.engines.storage_engine import delete_bucket
+
+    deleted = await delete_bucket(project_id=project_id, bucket=bucket)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Bucket not found or could not be deleted")
+    return {"data": {"deleted": True, "bucket": bucket}}
 
 
 @router.get("/storage/{project_id}/{bucket}/files", dependencies=[InternalGuard])
@@ -130,6 +132,7 @@ async def presign_upload(
 ) -> dict[str, Any]:
     """Generate a presigned upload URL for the dashboard."""
     from app.engines.storage_engine import get_presigned_upload_url
+    print(body)
     try:
         result = await get_presigned_upload_url(
             project_id=project_id,

@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     minio_public_endpoint: str = "http://localhost:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
-    minio_use_ssl: bool = False
+    region: str = "us-east-1"
+    minio_use_ssl: bool = True
+    storage_cors_allowed_origins: str = "http://localhost:3000"
 
     # Auth.js / per-project JWTs
     jwt_secret: str = Field(..., min_length=32)

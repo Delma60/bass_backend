@@ -33,7 +33,7 @@ async def get_upload_url(
 
     # In a fully fleshed out system, we would inject a permission check here
     # similar to the query/nosql engines (e.g. check_permission(..., "INSERT", "storage", ...))
-    
+    print(body)
     upload_url = await storage_engine.get_upload_url(
         project_id, bucket, body.filename, body.content_type
     )
