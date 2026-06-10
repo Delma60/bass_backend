@@ -11,6 +11,7 @@ from app.dependencies import AuthCtx, ParsedFilters, ProjectCtx, require_key_typ
 from app.engines import query_engine
 from app.engines.permission_engine import check_permission, inject_auth_uid
 from app.models.requests import InsertRowRequest, RpcCallRequest, UpdateRowRequest
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(prefix="/db", tags=["SQL Database"])
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ async def list_rows(
         auth_ctx=auth,
         extra_condition=condition,
     )
+    record_usage.delay(project_id, "db_reads", 1)
     return {"data": rows, "meta": {"count": total, "limit": limit, "offset": offset}}
 
 
@@ -75,6 +77,7 @@ async def get_row(
     row = await query_engine.get_row(db, ctx["db_schema"], table, row_id, select_cols=select, extra_condition=condition)
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
+    record_usage.delay(project_id, "db_reads", 1)
     return {"data": row}
 
 
@@ -100,11 +103,13 @@ async def insert_row(
         # Execute bulk insert inside a transaction so the operation is atomic
         async with db.begin():
             rows = await query_engine.insert_row(db, ctx["db_schema"], table, body.data)
+        record_usage.delay(project_id, "db_writes", len(rows))
         return {"data": rows, "meta": {"count": len(rows)}}
 
     # Single row
     async with db.begin():
         row = await query_engine.insert_row(db, ctx["db_schema"], table, body.data)
+    record_usage.delay(project_id, "db_writes", 1)
     return {"data": row}
 
 
@@ -126,6 +131,7 @@ async def update_row(
     row = await query_engine.update_row(db, ctx["db_schema"], table, row_id, body.data, extra_condition=condition)
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
+    record_usage.delay(project_id, "db_writes", 1)
     return {"data": row}
 
 
@@ -146,6 +152,7 @@ async def delete_row(
     deleted = await query_engine.delete_row(db, ctx["db_schema"], table, row_id, extra_condition=condition)
     if not deleted:
         raise HTTPException(status_code=404, detail="Row not found")
+    record_usage.delay(project_id, "db_writes", 1)
     return {"data": {"deleted": True, "id": row_id}}
 
 
@@ -180,4 +187,8 @@ async def call_rpc(
         params,
     )
     rows = [dict(r._mapping) for r in result]
+    
+    # Track the RPC call as a read
+    record_usage.delay(project_id, "db_reads", 1)
+    
     return {"data": rows}

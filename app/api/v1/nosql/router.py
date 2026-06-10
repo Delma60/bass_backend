@@ -15,6 +15,7 @@ from app.models.requests import (
     UpdateDocumentRequest,
 )
 from app.engines.permission_engine import check_permission, inject_auth_uid
+from app.tasks.usage_sync import record_usage
 
 async def _get_nosql_condition(project_id: str, collection: str, operation: str, auth: AuthCtx) -> dict[str, Any] | None:
     """Helper to evaluate permissions and format the NoSQL condition dict."""
@@ -51,6 +52,7 @@ async def find_documents(
         db, collection, sort=sort, limit=limit, skip=skip,
         filter_doc=filter_doc,
     )
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": docs, "meta": {"count": total, "limit": limit, "skip": skip}}
 
 
@@ -71,6 +73,7 @@ async def get_document(
     doc = await nosql_engine.get_document(db, collection, doc_id, extra_condition=condition)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": doc}
 
 
@@ -90,9 +93,11 @@ async def insert_document(
 
     if isinstance(body.data, list):
         ids = await nosql_engine.insert_many_documents(db, collection, body.data)
+        record_usage.delay(project_id, "nosql_writes", len(ids))
         return {"data": {"inserted_ids": ids}, "meta": {"count": len(ids)}}
 
     doc = await nosql_engine.insert_document(db, collection, body.data)
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": doc}
 
 
@@ -112,6 +117,7 @@ async def update_document(
     doc = await nosql_engine.update_document(db, collection, doc_id, body.update)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": doc}
 
 
@@ -130,6 +136,7 @@ async def delete_document(
     deleted = await nosql_engine.delete_document(db, collection, doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": {"deleted": True, "id": doc_id}}
 
 
@@ -146,6 +153,7 @@ async def aggregate_documents(
 
     db = get_project_db(ctx["mongo_database"])
     results = await nosql_engine.aggregate_documents(db, collection, body.pipeline)
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": results, "meta": {"count": len(results)}}
 
 
@@ -164,6 +172,7 @@ async def list_kv_keys(
 
     db = get_project_db(ctx["mongo_database"])
     entries = await nosql_engine.kv_list(db, prefix=prefix, limit=limit)
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": entries, "meta": {"count": len(entries)}}
 
 
@@ -181,6 +190,7 @@ async def get_kv(
     value = await nosql_engine.kv_get(db, key)
     if value is None:
         raise HTTPException(status_code=404, detail="Key not found")
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": {"key": key, "value": value}}
 
 
@@ -197,6 +207,7 @@ async def set_kv(
 
     db = get_project_db(ctx["mongo_database"])
     await nosql_engine.kv_set(db, key, body.value, ttl=body.ttl)
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": {"key": key, "value": body.value}}
 
 
@@ -214,6 +225,7 @@ async def delete_kv(
     deleted = await nosql_engine.kv_delete(db, key)
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": {"deleted": True, "key": key}}
 
 
@@ -231,6 +243,8 @@ async def batch_kv(
     db = get_project_db(ctx["mongo_database"])
     results = []
 
+    reads = 0
+    writes = 0
     for op in body.operations:
         op_type = op.get("op", "").lower()
         key = op.get("key", "")
@@ -241,14 +255,17 @@ async def batch_kv(
         if op_type == "get":
             value = await nosql_engine.kv_get(db, key)
             results.append({"key": key, "value": value})
+            reads += 1
         elif op_type == "set":
             value = op.get("value")
             ttl = op.get("ttl")
             await nosql_engine.kv_set(db, key, value, ttl=ttl)
             results.append({"key": key, "set": True})
+            writes += 1
         elif op_type == "delete":
             deleted = await nosql_engine.kv_delete(db, key)
             results.append({"key": key, "deleted": deleted})
+            writes += 1
         else:
             results.append({"key": key, "error": f"Unknown op: {op_type}"})
 

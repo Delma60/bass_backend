@@ -1,18 +1,49 @@
 # backend/app/tasks/celery_app.py
+from __future__ import annotations
+
+import platform
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
 from celery import Celery
 from celery.schedules import crontab
 
 from app.config import settings
 
+
+def _normalize_redis_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme != "rediss":
+        return url
+
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    cert_reqs = query.get("ssl_cert_reqs")
+    if cert_reqs is None or cert_reqs == "":
+        query["ssl_cert_reqs"] = "required"
+    else:
+        normalized = cert_reqs.lower()
+        if normalized.startswith("cert_"):
+            normalized = normalized[5:]
+        query["ssl_cert_reqs"] = normalized
+
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
 celery_app = Celery(
     "baas_platform",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=_normalize_redis_url(settings.redis_url),
+    backend=_normalize_redis_url(settings.redis_url),
     include=[
         "app.tasks.usage_sync",
         "app.tasks.invoice_gen",
     ],
 )
+
+extra_conf = {}
+if platform.system() == "Windows":
+    extra_conf.update(
+        worker_pool="solo",
+        worker_concurrency=1,
+    )
 
 celery_app.conf.update(
     task_serializer="json",
@@ -23,6 +54,8 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Windows cannot safely use prefork pools; use solo mode locally.
+    **extra_conf,
     # Retry policy defaults
     task_max_retries=3,
     task_default_retry_delay=60,

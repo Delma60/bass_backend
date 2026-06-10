@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from app.config import settings
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(tags=["Internal Storage Browse"])
 logger = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ async def presign_upload(
             content_type=body.content_type,
             expires_in=body.expires_in,
         )
+        record_usage.delay(project_id, "storage_bytes", 1)
         return {"data": result}
     except Exception as e:
         logger.error("Failed to presign upload for %s/%s: %s", project_id, bucket, e)

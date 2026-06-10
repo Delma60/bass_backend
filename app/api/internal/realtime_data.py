@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db.mongo import get_project_db
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(tags=["Internal Realtime Data"])
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ async def get_rtdb_data(
                 else:
                     node = node.setdefault(part, {})
 
+        record_usage.delay(project_id, "nosql_reads", 1)
         return {"data": {"tree": tree, "path": path, "count": len(docs)}}
     except Exception as e:
         logger.error("Failed to get rtdb data: %s", e)
@@ -123,6 +125,7 @@ async def set_rtdb_value(
             await broadcast_event(project_id, "rtdb", "SET", {"path": norm_path, "value": value})
         except Exception:
             pass
+        record_usage.delay(project_id, "nosql_writes", 1)
         return {"data": {"path": norm_path, "value": value, "set": True}}
     except Exception as e:
         logger.error("Failed to set rtdb value: %s", e)
@@ -150,6 +153,7 @@ async def delete_rtdb_value(
             await broadcast_event(project_id, "rtdb", "DELETE", {"path": norm_path})
         except Exception:
             pass
+        record_usage.delay(project_id, "nosql_writes", 1)
         return {"data": {"path": norm_path, "deleted": result.deleted_count}}
     except Exception as e:
         logger.error("Failed to delete rtdb value: %s", e)
@@ -166,6 +170,7 @@ async def get_rtdb_stats(
     coll = db[RTDB_COLLECTION]
     try:
         count = await coll.count_documents({})
+        record_usage.delay(project_id, "nosql_reads", 1)
         return {"data": {"total_nodes": count, "project_id": project_id}}
     except Exception:
         return {"data": {"total_nodes": 0, "project_id": project_id}}

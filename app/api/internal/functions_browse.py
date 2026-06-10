@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.postgres import get_db
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(tags=["Internal Functions"])
 logger = logging.getLogger(__name__)
@@ -344,6 +345,7 @@ async def test_function(
             {"id": function_id},
         )
         await db.commit()
+        record_usage.delay(project_id, "function_calls", 1)
     except Exception as log_err:
         logger.warning("Failed to log function invocation: %s", log_err)
 

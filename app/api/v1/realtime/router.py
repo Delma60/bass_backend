@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.dependencies import AuthCtx, ProjectCtx
 from app.models.requests import RealtimeSubscribeRequest
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(prefix="/realtime", tags=["Realtime"])
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ async def list_channels(
 
     schema = ctx["db_schema"]
     mongo_db = ctx["mongo_database"]
+    record_usage.delay(project_id, "db_reads", 1)
 
     return {
         "data": {
@@ -54,6 +56,7 @@ async def get_subscription_token(
     schema = ctx["db_schema"]
     resource = body.table_or_collection
     channel = f"{schema}_{resource}_changes"
+    record_usage.delay(project_id, "db_reads", 1)
 
     return {
         "data": {

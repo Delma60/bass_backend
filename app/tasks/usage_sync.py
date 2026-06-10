@@ -2,15 +2,12 @@
 """
 Usage sync tasks.
 
-The API layer increments lightweight Redis counters on each request:
-  INCR usage:{project_id}:db_reads
-  INCR usage:{project_id}:db_writes
-  INCR usage:{project_id}:storage_bytes
-  INCR usage:{project_id}:function_calls
-  INCR usage:{project_id}:nosql_reads
-  INCR usage:{project_id}:nosql_writes
+The API layer increments lightweight Redis counters on each request via
+record_usage() — which works both as a Celery task AND as a direct call.
 
-The flush_redis_counters task (hourly) reads and resets these counters,
+Counter key format:  usage:{project_id}:{metric}
+
+flush_redis_counters (hourly Celery task) reads and resets these counters,
 writing aggregated rows into the usage_records Postgres table.
 
 sync_all_project_usage (every 5 min) re-aggregates from usage_records
@@ -20,6 +17,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+import redis as sync_redis
+
+from app.config import settings
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,8 @@ TRACKED_METRICS = [
     "function_calls",
     "ai_requests",
 ]
+
+_redis_pool = sync_redis.ConnectionPool.from_url(settings.redis_url, decode_responses=True)
 
 
 def _run_async(coro):  # type: ignore[no-untyped-def]
@@ -48,14 +50,12 @@ async def _flush_counters_async() -> dict[str, int]:
     """Read + reset all Redis usage counters, write to Postgres."""
     import redis.asyncio as aioredis
     from sqlalchemy import text
-    from app.config import settings
     from app.db.postgres import AsyncSessionLocal
 
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     flushed: dict[str, int] = {}
 
     try:
-        # Scan all usage keys
         keys = []
         async for key in redis.scan_iter("usage:*"):
             keys.append(key)
@@ -74,7 +74,6 @@ async def _flush_counters_async() -> dict[str, int]:
         for key, raw_value in zip(keys, values):
             if not raw_value:
                 continue
-            # key format: usage:{project_id}:{metric}
             parts = key.split(":", 2)
             if len(parts) != 3:
                 continue
@@ -116,7 +115,6 @@ async def _sync_usage_async() -> None:
     """Recompute current-period aggregates and cache in Redis for the dashboard."""
     import redis.asyncio as aioredis
     from sqlalchemy import text
-    from app.config import settings
     from app.db.postgres import AsyncSessionLocal
 
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -170,13 +168,35 @@ def sync_all_project_usage(self) -> dict:  # type: ignore[no-untyped-def]
 def record_usage(project_id: str, metric: str, value: int = 1) -> None:
     """
     Fire-and-forget: increment a usage counter in Redis.
+
+    This is a Celery task BUT it also works when called directly (without .delay())
+    because the sync Redis client is always available.
+
     Called from API routes as a background task — never blocks the request.
     """
-    import redis as sync_redis
-    from app.config import settings
+    _incr_redis_sync(project_id, metric, value)
 
-    r = sync_redis.from_url(settings.redis_url, decode_responses=True)
+
+def _incr_redis_sync(project_id: str, metric: str, value: int = 1) -> None:
+    """
+    Increment usage counter in Redis synchronously.
+    Used by record_usage task AND by the inline increment helper below.
+    """
+    r = sync_redis.Redis(connection_pool=_redis_pool)
     try:
         r.incr(f"usage:{project_id}:{metric}", value)
+    except Exception as exc:
+        logger.warning("Failed to increment usage counter %s/%s: %s", project_id, metric, exc)
     finally:
         r.close()
+
+
+async def increment_usage(project_id: str, metric: str, value: int = 1) -> None:
+    """
+    Async helper to increment a usage counter from async FastAPI routes.
+    Runs the sync Redis INCR in a thread so the event loop is never blocked,
+    and reuses the same sync connection pool as the Celery record_usage task —
+    this avoids any SSL configuration mismatches from the async redis client.
+    """
+    import asyncio
+    await asyncio.to_thread(_incr_redis_sync, project_id, metric, value)

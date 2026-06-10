@@ -1,3 +1,4 @@
+# backend/app/dependencies.py
 from typing import Annotated, Any
 
 from fastapi import Depends, Header, HTTPException, Query, Request
@@ -5,6 +6,7 @@ from jose import JWTError
 
 from app.middleware.api_key import validate_api_key
 from app.middleware.rate_limit import rate_limit
+from app.middleware.usage_limit import check_usage_limits
 from app.models.permissions import AuthContext
 
 
@@ -12,6 +14,7 @@ async def get_project_context(
     request: Request,
     _key: dict = Depends(validate_api_key),
     _rate: None = Depends(rate_limit),
+    _limits: None = Depends(check_usage_limits),  # FIX 1: wire in usage limit enforcement
 ) -> dict[str, Any]:
     """Returns project context from request state (set by api_key middleware)."""
     return {

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.dependencies import AuthCtx, ProjectCtx, require_key_type
 from app.engines.function_runner import invoke_function
 from app.models.requests import FunctionInvokeRequest
-
+from app.tasks.usage_sync import record_usage
 router = APIRouter(prefix="/functions", tags=["Edge Functions"])
 logger = logging.getLogger(__name__)
 
@@ -37,4 +37,5 @@ async def invoke(
         payload=body.payload,
         headers=extra_headers,
     )
+    record_usage.delay(project_id, "function_calls", 1)
     return {"data": result}

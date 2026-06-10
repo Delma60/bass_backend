@@ -16,11 +16,15 @@ from .realtime_browse import router as realtime_browser
 from .functions_browse import router as function_browser
 from .storage_browse import router as storage_browser
 from .settings_browse import router as settings_browser
+from .billing_browse import router as billing_browser
 from .auth_settings import router as auth_settings_router
 from .realtime_data import router as realtime_data_router
 from app.config import settings
 from app.db.postgres import get_db
 from .notifications import router as notification_router
+from .billing import router as billing_router
+from .usage_browse import router as usage_browse_router
+
 
 from app.provisioner.sql_provisioner import (
     add_column,
@@ -51,6 +55,9 @@ router.include_router(storage_browser)
 router.include_router(function_browser)
 router.include_router(settings_browser)
 router.include_router(notification_router)
+router.include_router(billing_router)
+router.include_router(billing_browser)
+router.include_router(usage_browse_router)
 # ─── Auth guard ───────────────────────────────────────────────────────────────
 
 async def require_internal(x_internal_secret: str = Header(...)) -> None:
@@ -298,6 +305,45 @@ async def platform_signin(
         }
     }
 
+
+@router.get("/users/{user_id}/org", dependencies=[InternalGuard])
+async def get_user_org(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Get the personal organization for a platform user.
+    Creates one automatically if none exists (idempotent).
+    Used by the billing page to resolve orgId from userId.
+    """
+    result = await db.execute(
+        text("""
+            SELECT o.id, o.name, o.plan, o.created_at
+            FROM organizations o
+            WHERE o.owner_id = :user_id
+            LIMIT 1
+        """),
+        {"user_id": user_id},
+    )
+    row = result.mappings().first()
+    if row:
+        r = dict(row)
+        if r.get("created_at") and hasattr(r["created_at"], "isoformat"):
+            r["created_at"] = r["created_at"].isoformat()
+        return {"data": {"org_id": r["id"], "name": r["name"], "plan": r["plan"]}}
+
+    # No org found — create personal org and return it
+    user_result = await db.execute(
+        text("SELECT name FROM users WHERE id = :user_id"),
+        {"user_id": user_id},
+    )
+    user_row = user_result.mappings().first()
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    org_id = await _get_or_create_personal_org(db, user_id, user_row["name"])
+    await db.commit()
+    return {"data": {"org_id": org_id, "plan": "free"}}
 
 # ─── Projects ─────────────────────────────────────────────────────────────────
 
@@ -720,27 +766,7 @@ async def revoke_api_key(
     return {"data": {"id": key_id, "revoked": True}}
 
 
-# ─── Usage ────────────────────────────────────────────────────────────────────
-
-@router.get("/usage/{project_id}", dependencies=[InternalGuard])
-async def get_project_usage(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    result = await db.execute(
-        text("""
-            SELECT metric, SUM(value) as total
-            FROM usage_records
-            WHERE project_id = :project_id
-              AND period_start >= NOW() - INTERVAL '30 days'
-            GROUP BY metric
-        """),
-        {"project_id": project_id},
-    )
-    rows = {r["metric"]: r["total"] for r in result.mappings()}
-    return {"data": rows}
-
-
+   
 # ─── Permissions ──────────────────────────────────────────────────────────────
 
 class UpsertPermissionRequest(BaseModel):

@@ -12,6 +12,7 @@ from app.engines.storage_engine import (
     list_files,
 )
 from app.engines import storage_engine
+from app.tasks.usage_sync import record_usage
 
 from app.models.requests import PresignedUploadRequest
 
@@ -33,13 +34,16 @@ async def get_upload_url(
 
     # In a fully fleshed out system, we would inject a permission check here
     # similar to the query/nosql engines (e.g. check_permission(..., "INSERT", "storage", ...))
-    print(body)
+    # print(body)
     upload_url = await storage_engine.get_upload_url(
         project_id, bucket, body.filename, body.content_type
     )
     
     # We also return what the final GET URL will be for client convenience
     file_url = await storage_engine.get_download_url(project_id, bucket, body.filename)
+
+    # Track storage usage (placeholder: 1 byte; would be actual file size for full accuracy)
+    record_usage.delay(project_id, "storage_bytes", 1)
 
     return {
         "data": {

@@ -19,6 +19,7 @@ from app.db.postgres import get_db, set_tenant_session
 from app.dependencies import AuthCtx, ProjectCtx
 from app.models.requests import RefreshTokenRequest, SignInRequest, SignUpRequest
 from jose import JWTError
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ async def sign_up(
 
     access_token = create_access_token(subject=user_id, project_id=project_id)
     refresh_token = create_refresh_token(subject=user_id, project_id=project_id)
+    record_usage.delay(project_id, "auth_signup", 1)
 
     return {
         "data": {

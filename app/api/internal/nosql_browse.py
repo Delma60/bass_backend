@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.db.mongo import get_project_db
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(tags=["Internal NoSQL Browse"])
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ async def list_collection_documents(
     except Exception as e:
         logger.error("Failed to list documents from %s: %s", collection, e)
         return {"data": {"docs": [], "total": 0}}
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": {"docs": docs, "total": total}}
 
 
@@ -104,6 +106,7 @@ async def delete_document_internal(
     deleted = await delete_document(db, collection, doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": {"deleted": True, "id": doc_id}}
 
 
@@ -118,6 +121,7 @@ async def list_kv_internal(
 
     db = get_project_db(mongo_database)
     entries = await kv_list(db, prefix=prefix, limit=limit)
+    record_usage.delay(project_id, "nosql_reads", 1)
     return {"data": {"entries": entries}}
 
 
@@ -139,6 +143,7 @@ async def set_kv_internal(
     ttl = body.get("ttl")
     db = get_project_db(mongo_database)
     await kv_set(db, key, value, ttl=ttl)
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": {"key": key, "value": value}}
 
 
@@ -157,6 +162,7 @@ async def delete_kv_internal(
     deleted = await kv_delete(db, key)
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")
+    record_usage.delay(project_id, "nosql_writes", 1)
     return {"data": {"deleted": True, "key": key}}
 
 

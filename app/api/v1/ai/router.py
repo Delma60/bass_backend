@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.postgres import get_db
 from app.dependencies import AuthCtx, ProjectCtx, require_key_type
 from app.engines.vector_engine import similarity_search, upsert_embedding
+from app.tasks.usage_sync import record_usage
 
 router = APIRouter(prefix="/ai", tags=["AI / Vector"])
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ async def create_embedding(
         logger.error("Embedding generation failed: %s", e)
         raise HTTPException(status_code=502, detail="Failed to generate embedding")
 
+    record_usage.delay(project_id, "ai_requests", 1)
     return {"data": {"embedding": embedding, "model": body.model, "dimensions": len(embedding)}}
 
 
@@ -88,6 +90,7 @@ async def upsert_vector(
         metadata=body.metadata,
     )
     await db.commit()
+    record_usage.delay(project_id, "ai_requests", 1)
     return {"data": {"id": body.id, "upserted": True}}
 
 
