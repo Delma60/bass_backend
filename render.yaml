@@ -1,0 +1,193 @@
+services:
+  # ─── FastAPI Web Server ───────────────────────────────────────────────────
+  - type: web
+    name: yourbaas-backend
+    runtime: python
+    buildCommand: uv sync --frozen && uv cache prune --ci && uv run alembic upgrade head
+    startCommand: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SYNC_URL
+        sync: false
+      - key: MONGODB_URL
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: baas_platform
+      - key: REDIS_URL
+        sync: false
+      - key: INTERNAL_API_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: STAFF_JWT_SECRET
+        sync: false
+      - key: STAFF_JWT_EXPIRY
+        value: "28800"
+      - key: API_KEY_ENCRYPTION_SECRET
+        sync: false
+      - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PUBLIC_ENDPOINT
+        sync: false
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+      - key: MINIO_USE_SSL
+        value: "true"
+      - key: REGION
+        value: us-west-002
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "false"
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_PUBLIC_KEY
+        sync: false
+      - key: FLUTTERWAVE_WEBHOOK_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  # ─── Celery Worker ────────────────────────────────────────────────────────
+  # Processes background tasks: invoice charging, usage syncing, email sending
+  - type: worker
+    name: yourbaas-celery-worker
+    runtime: python
+    buildCommand: uv sync --frozen && uv cache prune --ci
+    startCommand: uv run celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SYNC_URL
+        sync: false
+      - key: MONGODB_URL
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: baas_platform
+      - key: REDIS_URL
+        sync: false
+      - key: INTERNAL_API_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: STAFF_JWT_SECRET
+        sync: false
+      - key: API_KEY_ENCRYPTION_SECRET
+        sync: false
+      - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PUBLIC_ENDPOINT
+        sync: false
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+      - key: MINIO_USE_SSL
+        value: "true"
+      - key: REGION
+        value: us-west-002
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "false"
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_PUBLIC_KEY
+        sync: false
+      - key: FLUTTERWAVE_WEBHOOK_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  # ─── Celery Beat Scheduler ────────────────────────────────────────────────
+  # Runs periodic tasks: monthly invoices, hourly usage flush, 5-min usage sync
+  # IMPORTANT: Only ever run ONE instance of beat — never scale this above 1
+  - type: worker
+    name: yourbaas-celery-beat
+    runtime: python
+    buildCommand: uv sync --frozen && uv cache prune --ci
+    startCommand: uv run celery -A app.tasks.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SYNC_URL
+        sync: false
+      - key: MONGODB_URL
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: baas_platform
+      - key: REDIS_URL
+        sync: false
+      - key: INTERNAL_API_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: STAFF_JWT_SECRET
+        sync: false
+      - key: API_KEY_ENCRYPTION_SECRET
+        sync: false
+      - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PUBLIC_ENDPOINT
+        sync: false
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+      - key: MINIO_USE_SSL
+        value: "true"
+      - key: REGION
+        value: us-west-002
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "false"
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_SECRET_KEY
+        sync: false
+      - key: FLUTTERWAVE_WEBHOOK_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
